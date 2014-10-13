@@ -1,8 +1,6 @@
-require 'torch'
-
 -- you can easily test specific units like this: 
--- luajit -lnn -e "nn.test{'LookupTable'}"
--- luajit -lnn -e "nn.test{'LookupTable', 'Add'}"
+-- th -lnn -e "nn.test{'LookupTable'}"
+-- th -lnn -e "nn.test{'LookupTable', 'Add'}"
 
 local mytester = torch.Tester()
 local jac
@@ -16,7 +14,7 @@ local nntest = {}
 local function equal(t1, t2, msg)
    if (torch.type(t1) == "table") then
       for k, v in pairs(t2) do
-         equal(t1[k], t2[k])
+         equal(t1[k], t2[k], msg)
       end
    else
       mytester:assertTensorEq(t1, t2, 0.00001, msg)
@@ -483,6 +481,13 @@ function nntest.MSECriterion()
    criterionJacobianTest1D(cri, input, target)   
 end
 
+function nntest.MarginCriterion()
+   local input = torch.rand(100)
+   local target = input:clone():add(torch.rand(100))
+   local cri = nn.MarginCriterion()
+   criterionJacobianTest1D(cri, input, target)   
+end
+
 function nntest.WeightedMSECriterion()
    local input = torch.rand(100)
    local target = input:clone():add(torch.rand(100))
@@ -504,6 +509,22 @@ function nntest.DistKLDivCriterion()
    local cri = nn.DistKLDivCriterion(true)  -- sizeAverage = true
    criterionJacobianTest1D(cri, input, target)
    cri = nn.DistKLDivCriterion(false)  -- sizeAverage = false
+   criterionJacobianTest1D(cri, input, target)
+end
+
+function nntest.ClassNLLCriterion()
+   local numLabels = math.random(5,10)	
+   local input = torch.rand(numLabels)
+   local target = math.random(1,numLabels)	
+
+   -- default ClassNLLCriterion
+   local cri = nn.ClassNLLCriterion()
+   criterionJacobianTest1D(cri, input, target)
+
+   -- ClassNLLCriterion with weights
+   local weights = torch.rand(numLabels)
+   weights = weights / weights:sum()
+   cri = nn.ClassNLLCriterion(weights)
    criterionJacobianTest1D(cri, input, target)
 end
 
@@ -842,31 +863,34 @@ function nntest.SpatialConvolution()
 end
 
 function nntest.SpatialConvolutionMM()
-   local from = math.random(1,10)
+   local from = math.random(2,10)
    local to = math.random(1,10)
    local ki = math.random(1,5)
    local kj = math.random(1,5)
+   local di = 1 -- NOTE: dw/dh still not supported
+   local dj = 1
+   local padding = math.random(0,2)
    local outi = math.random(10,20)
    local outj = math.random(10,20)
-   local ini = outi-1+ki
-   local inj = outj-1+kj
-   local module = nn.SpatialConvolutionMM(from, to, ki, kj)
+   local ini = outi-padding*2-1+ki
+   local inj = outj-padding*2-1+kj
+   local module = nn.SpatialConvolutionMM(from, to, ki, kj, di, dj, padding)
    local input = torch.Tensor(from, inj, ini):zero()
 
    -- stochastic
-   
+
    local err = jac.testJacobian(module, input)
    mytester:assertlt(err, precision, 'error on state ')
-   
+
    local err = jac.testJacobianParameters(module, input, module.weight, module.gradWeight)
    mytester:assertlt(err , precision, 'error on weight ')
-   
+
    local err = jac.testJacobianParameters(module, input, module.bias, module.gradBias)
    mytester:assertlt(err , precision, 'error on bias ')
 
    local err = jac.testJacobianUpdateParameters(module, input, module.weight)
    mytester:assertlt(err , precision, 'error on weight [direct update] ')
-   
+
    local err = jac.testJacobianUpdateParameters(module, input, module.bias)
    mytester:assertlt(err , precision, 'error on bias [direct update] ')
 
@@ -881,28 +905,24 @@ function nntest.SpatialConvolutionMM()
    end
 
    -- batch
-   
+
    --verbose = true
-   local batch = math.random(2,5)
-   outi = math.random(4,8)
-   outj = math.random(4,8)
-   ini = outi-1+ki
-   inj = outj-1+kj
-   module = nn.SpatialConvolutionMM(from, to, ki, kj)
+   local batch = math.random(2,6)
+   module = nn.SpatialConvolutionMM(from, to, ki, kj, di, dj, padding)
    input = torch.Tensor(batch,from,inj,ini):zero()
 
    local err = jac.testJacobian(module, input)
    mytester:assertlt(err, precision, 'batch error on state ')
-   
+
    local err = jac.testJacobianParameters(module, input, module.weight, module.gradWeight)
    mytester:assertlt(err , precision, 'batch error on weight ')
-   
+
    local err = jac.testJacobianParameters(module, input, module.bias, module.gradBias)
    mytester:assertlt(err , precision, 'batch error on bias ')
 
    local err = jac.testJacobianUpdateParameters(module, input, module.weight)
    mytester:assertlt(err , precision, 'batch error on weight [direct update] ')
-   
+
    local err = jac.testJacobianUpdateParameters(module, input, module.bias)
    mytester:assertlt(err , precision, 'batch error on bias [direct update] ')
 
@@ -915,7 +935,7 @@ function nntest.SpatialConvolutionMM()
       mytester:assertlt(err, precision, string.format(
                          'batch error on bias [%s]', t))
    end
-   
+
    local ferr, berr = jac.testIO(module, input)
    mytester:asserteq(0, ferr, torch.typename(module) .. ' - i/o forward err ')
    mytester:asserteq(0, berr, torch.typename(module) .. ' - i/o backward err ')
@@ -1748,6 +1768,37 @@ function nntest.Module_getParameters_7()
    mytester:asserteq(p:nElement(), 121, 'error: incorrect number of elements in flat vector')
 end
 
+function nntest.Module_getParameters_8()
+   local function makeMLP(nin, ns)
+      local net = nn.Sequential()
+    
+      for k,v in ipairs(ns) do 
+         net:add(nn.Linear(nin, v))
+         nin = v
+      end
+      _,_ = net:getParameters()
+      return net
+   end
+
+  local mlp1 = makeMLP(10, {10,10})
+  local mlp2 = makeMLP(10, {10,10})
+
+  local net = nn.Sequential():add(mlp1:get(1))
+                             :add(mlp2:get(1))
+                             
+  -- clone the second MLP to ensure that the weights before calling getParameters are preserved
+  mlp2 = mlp2:clone() 
+
+  local p, gp = net:getParameters()
+
+  mytester:asserteq((p[{ {1,100} }] - net.modules[1].weight):norm(), 0, 'error when using partial realloc')
+  mytester:asserteq((p[{ {111,210} }] - net.modules[2].weight):norm(), 0, 'error when using partial realloc')
+  -- check that the weights have the same values as before get Parameters was called
+  mytester:asserteq((net.modules[1].weight - mlp1.modules[1].weight):norm(), 0, ' error when using partial realloc')
+  mytester:asserteq((net.modules[2].weight - mlp2.modules[1].weight):norm(), 0, ' error when using partial realloc')
+  
+end
+
 function nntest.PairwiseDistance()
    -- Note: testJacobian doesn't support table inputs, and rather than re-write
    -- it so that it does, I'll just use a split table module on the input.
@@ -2122,6 +2173,25 @@ function nntest.View()
       "Error in minibatch nElement with size -1")
 end
 
+function nntest.Reshape()
+   local input = torch.rand(10)
+   local template = torch.rand(5,2)
+   local target = template:size():totable()
+   local module = nn.Reshape(template:size())
+   mytester:assertTableEq(module:forward(input):size():totable(), target, "Error in forward (1)")
+   local module = nn.View(unpack(target))
+   mytester:assertTableEq(module:forward(input):size():totable(), target, "Error in forward (2)")
+
+   -- Minibatch
+   local minibatch = torch.rand(5,10)
+   mytester:assertTableEq(module:forward(minibatch):size(1),
+      minibatch:size(1),
+      "Error in minibatch dimension")
+   mytester:assertTableEq(module:forward(minibatch):nElement(),
+      minibatch:nElement(),
+      "Error in minibatch nElement")
+end
+
 -- Define a test for SpatialUpSamplingCuda
 function nntest.SpatialUpSamplingNearest()
   local scale = torch.random(2,4)
@@ -2291,6 +2361,36 @@ function nntest.L1Penalty()
    -- Note: We cannot use the Jacobian test for this Module since the backward
    -- gradient cannot be estimated using finite differences (ie, the loss
    -- during BPROP is not included in the FPROP output)
+end
+
+function nntest.DepthConcat()
+   local outputSize = torch.IntTensor{5,6,7,8}
+   local input = torch.randn(2,3,12,12)
+   local gradOutput = torch.randn(2, outputSize:sum(), 12, 12)
+   local concat = nn.DepthConcat(2)
+   concat:add(nn.SpatialConvolutionMM(3, outputSize[1], 1, 1, 1, 1)) --> 2, 5, 12, 12
+   concat:add(nn.SpatialConvolutionMM(3, outputSize[2], 3, 3, 1, 1)) --> 2, 6, 10, 10
+   concat:add(nn.SpatialConvolutionMM(3, outputSize[3], 4, 4, 1, 1)) --> 2, 7, 9, 9
+   concat:add(nn.SpatialConvolutionMM(3, outputSize[4], 5, 5, 1, 1)) --> 2, 8, 8, 8
+   concat:zeroGradParameters()
+   -- forward/backward
+   local outputConcat = concat:forward(input)
+   local gradInputConcat = concat:backward(input, gradOutput)
+   -- the spatial dims are the largest, the nFilters is the sum
+   local output = torch.Tensor(2, outputSize:sum(), 12, 12):zero() -- zero for padding
+   local narrows = { {{},{1,5},{},{}}, {{},{6,11},{2,11},{2,11}}, {{},{12,18},{2,10},{2,10}}, {{},{19,26},{3,10},{3,10}} }
+   local gradInput = input:clone():zero()
+   local gradWeights = {}
+   for i=1,4 do
+      local conv = concat:get(i)
+      local gradWeight = conv.gradWeight:clone()
+      conv:zeroGradParameters()
+      output[narrows[i]]:copy(conv:forward(input))
+      gradInput:add(conv:backward(input, gradOutput[narrows[i]]))
+      mytester:assertTensorEq(gradWeight, conv.gradWeight, 0.000001, "Error in SpatialConcat:accGradParameters for conv "..i)
+   end
+   mytester:assertTensorEq(output, outputConcat, 0.000001, "Error in SpatialConcat:updateOutput")
+   mytester:assertTensorEq(gradInput, gradInputConcat, 0.000001, "Error in SpatialConcat:updateGradInput")
 end
 
 mytester:add(nntest)
