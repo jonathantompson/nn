@@ -112,6 +112,8 @@ include('L1Penalty.lua')
 include('WeightedMSECriterion.lua')
 include('BCECriterion.lua')
 
+include('SSMPoolingOffsets.lua')
+
 include('StochasticGradient.lua')
 
 include('Jacobian.lua')
