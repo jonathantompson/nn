@@ -1,4 +1,5 @@
-local SSMPoolingOffsets, parent = torch.class('jzt.SSMPoolingOffsets', 'nn.Module')
+local SSMPoolingOffsets, parent = torch.class('nn.SSMPoolingOffsets', 
+  'nn.Module')
 
 function SSMPoolingOffsets:__init(kW, kH)
    parent.__init(self)
@@ -15,7 +16,7 @@ function SSMPoolingOffsets:updateOutput(input)
         self.softmax = torch.CudaTensor()  
         self.gridX = self.gridX:cuda() 
         self.gridY = self.gridY:cuda() 
-        jzt.SSMPoolingOffsets_updateOutput(self, input)
+        nn.SSMPoolingOffsets_updateOutput(self, input)
     else
         local inputSize = input:size() 
         local nOutputPlane = 2*inputSize[2] 
@@ -68,7 +69,7 @@ end
 
 function SSMPoolingOffsets:updateGradInput(input, gradOutput)
     if input:type() == 'torch.CudaTensor' then 
-        jzt.SSMPoolingOffsets_updateGradInput(self, input, gradOutput)
+        nn.SSMPoolingOffsets_updateGradInput(self, input, gradOutput)
     else   
         self.gradInput = torch.Tensor():resizeAs(input):fill(0)  
         local inputSize = input:size() 
