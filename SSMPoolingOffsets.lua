@@ -16,7 +16,7 @@ function SSMPoolingOffsets:updateOutput(input)
         self.softmax = torch.CudaTensor()  
         self.gridX = self.gridX:cuda() 
         self.gridY = self.gridY:cuda() 
-        nn.SSMPoolingOffsets_updateOutput(self, input)
+        input.nn.SSMPoolingOffsets_updateOutput(self, input)
     else
         local inputSize = input:size() 
         local nOutputPlane = 2*inputSize[2] 
@@ -69,7 +69,7 @@ end
 
 function SSMPoolingOffsets:updateGradInput(input, gradOutput)
     if input:type() == 'torch.CudaTensor' then 
-        nn.SSMPoolingOffsets_updateGradInput(self, input, gradOutput)
+        input.nn.SSMPoolingOffsets_updateGradInput(self, input, gradOutput)
     else   
         self.gradInput = torch.Tensor():resizeAs(input):fill(0)  
         local inputSize = input:size() 
